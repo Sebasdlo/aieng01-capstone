@@ -99,6 +99,14 @@ Se utiliza un subagente para separar el análisis inicial de la revisión de los
 
 El verificador no confirma causas raíz ni modifica tickets.
 
+## Video de demostración
+
+Demostración del funcionamiento de RepetiDesk IA,
+incluyendo el servidor MCP, subagente verificador,
+guardrails, evaluaciones y optimización de costos.
+
+https://youtu.be/LNrniobp-tE
+
 ## Cómo correrlo
 
 El proyecto funciona en el Cloud Workspace del curso, con Claude mediante Amazon Bedrock.
