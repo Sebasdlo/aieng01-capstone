@@ -1,0 +1,5 @@
+claude-agent-sdk>=0.2.160  # el agente (L4/L6); trae su propio Claude Code
+mcp>=1.2,<2                # tu servidor MCP (FastMCP, L3/L4)
+anthropic[bedrock]>=0.69   # claude_client.py: el juez de evals.py (L7) y costing.py (L8)
+pydantic>=2.7
+python-dotenv>=1.0

@@ -1,0 +1,27 @@
+{
+  "guardrails": true,
+  "pasaron": 1,
+  "total": 1,
+  "tokens": 8705,
+  "segundos": 17.2,
+  "casos": [
+    {
+      "id": "g01",
+      "categoria": "camino feliz",
+      "paso": true,
+      "fallas": [],
+      "respuesta": "✅ **Verificación completada**\n\nEl verificador ha analizado los tickets y confirmado los incidentes repetidos:\n\n---\n\n## **GRUPO IDENTIFICADO: Problemas de Acceso a Inventarios**\n\n| Aspecto | Detalle |\n|--------|--------|\n| **Sistema afectado** | Inventarios |\n| **Ubicación** | Bodega Bogota |\n| **Tickets relacionados** | T001, T002, T015, T003 |\n| **Cantidad de incidentes** | 4 |\n| **Estado** | Todos abiertos |\n\n### **Motivo de la agrupación:**\nLos cuatro tickets describen variaciones del mismo problema funcional: **incapacidad de acceder al sistema de inventarios**. \n\n- **T001, T002, T015:** Reportan fallos en ingreso/apertura/acceso al módulo\n- **T003:** Reporte específico de error en sesión/autenticación\n\nAunque los síntomas tienen matices diferentes, todos afectan la disponibilidad del sistema en la misma ubicación.\n\n### **Limitaciones detectadas:**\n- Causa raíz **no confirmada** por el verificador\n- Los errores de acceso y autenticación frecuentemente comparten causas comunes: caída del servidor, problemas de conectividad, permisos globales\n\n### **Recomendación para Helpdesk:**\nInvestigar como **grupo único** enfocándose en:\n1. Estado y disponibilidad del servidor de Inventarios\n2. Conectividad de Bodega Bogota\n3. Permisos de acceso globales o del módulo\n\nRequiere **verificación técnica** antes de confirmar causa raíz.",
+      "herramientas": [
+        "listar_tickets",
+        "Agent",
+        "consultar_ticket",
+        "consultar_ticket",
+        "consultar_ticket",
+        "consultar_ticket"
+      ],
+      "bloqueado_entrada": false,
+      "bloqueado_salida": false,
+      "traza": "20261110-010717-37073a"
+    }
+  ]
+}

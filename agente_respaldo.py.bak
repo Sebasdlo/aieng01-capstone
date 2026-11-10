@@ -1,0 +1,427 @@
+
+"""
+AIENG01 - Proyecto Integrador L9
+RepetiDesk IA - Detector de incidentes repetidos
+
+Basado en:
+L4 - Claude Agent SDK y servidor MCP.
+L6 - Subagentes.
+L7 - Guardrails, trazas y evaluaciones.
+L8 - Control de costos.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import anyio
+
+from claude_agent_sdk import (
+    AgentDefinition,
+    AssistantMessage,
+    ClaudeAgentOptions,
+    HookMatcher,
+    ResultError,
+    ResultMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+    query,
+)
+
+from politica import hook_politica
+from sdk_config import MODELO, proveedor
+
+
+AQUI = Path(__file__).parent
+
+
+# --------------------------------------------------
+# 1. INSTRUCCIONES DEL AGENTE PRINCIPAL
+# --------------------------------------------------
+
+SYSTEM = """
+Eres RepetiDesk IA, un agente de inteligencia artificial
+especializado en detectar incidentes repetidos de Helpdesk
+en una empresa de logistica.
+
+OBJETIVO:
+Identificar posibles incidentes repetidos utilizando
+los tickets registrados en el servidor MCP.
+
+PROCEDIMIENTO:
+
+1. Cuando el usuario pregunte por incidentes repetidos,
+   utiliza listar_tickets sin filtros para obtener
+   todos los tickets disponibles.
+
+2. Compara los incidentes considerando:
+   - Sistema afectado.
+   - Ubicacion.
+   - Descripcion del problema.
+   - Tipo de falla.
+
+3. Considera un posible grupo repetido cuando existan
+   al menos dos tickets que describan problemas similares
+   del mismo sistema y ubicacion.
+
+4. No agrupes tickets solamente porque pertenecen
+   al mismo sistema. La falla debe ser similar.
+
+5. Antes de presentar los grupos, delega la verificacion
+   al subagente llamado verificador usando Agent.
+   Proporcionale los IDs de los tickets candidatos
+   y el motivo por el que consideras que se relacionan.
+
+6. Utiliza el resultado del verificador para preparar
+   la respuesta final.
+
+7. Si el subagente no esta disponible, informa que
+   la agrupacion no fue verificada.
+
+FORMATO DE RESPUESTA:
+
+Para cada grupo identificado muestra:
+
+- Sistema afectado.
+- Ubicacion.
+- Tickets relacionados.
+- Cantidad de incidentes.
+- Motivo de la agrupacion.
+- Recomendacion para Helpdesk.
+
+REGLAS:
+
+- Consulta las herramientas MCP para obtener los datos.
+- No inventes tickets ni informacion.
+- No confirmes una falla general sin evidencia.
+- No modifiques, cierres ni escales tickets.
+- No solicites permisos o accesos externos cuando
+  los tickets ya estan disponibles por MCP.
+- Si una herramienta falla, informa el problema real.
+- Responde siempre en espanol.
+- Se breve, claro y preciso.
+
+REGLAS DE VERIFICACION:
+
+- Identificar tickets similares no significa que tengan
+  la misma causa raiz.
+
+- No afirmar que dos reportes corresponden al
+  mismo dispositivo fisico sin un identificador
+  de equipo que lo demuestre.
+
+- No afirmar que dos incidentes tienen el mismo
+  origen sin evidencia tecnica.
+
+- Utilizar expresiones como:
+  "posibles incidentes relacionados",
+  "requieren verificacion tecnica".
+
+- No recomendar cerrar ni consolidar tickets
+  automaticamente.
+
+  REGLAS DE EFICIENCIA Y PRECISION:
+
+- Consulta los tickets una sola vez.
+- Delega cada grupo candidato una sola vez.
+- Utiliza las conclusiones del verificador.
+- No repitas investigaciones.
+- Responde de forma breve.
+- No afirmes causas raiz sin evidencia.
+- No afirmes que dos reportes pertenecen
+  al mismo equipo fisico sin comprobarlo.
+- Clasifica los grupos como posibles
+  incidentes relacionados.
+- No recomiendes cerrar tickets automaticamente.
+
+CRITERIO PARA INTERPRETAR AL VERIFICADOR:
+
+- Agrupa los tickets cuando exista similitud funcional
+  suficiente en el mismo sistema y ubicacion.
+
+- Conserva dentro del grupo las diferencias de sintomas
+  como observaciones que requieren investigacion.
+
+- No separes automaticamente un ticket solo porque
+  menciona autenticacion y los otros mencionan acceso.
+
+- No presentes los grupos como fallas generales confirmadas.
+
+- Si el verificador encuentra sintomas relacionados,
+  presenta un grupo de posibles incidentes y explica
+  las diferencias que requieren comprobacion.
+
+  OPTIMIZACION DE COSTOS:
+
+Cuando consultes listar_tickets, conserva los datos
+recibidos.
+
+Al invocar al subagente verificador, enviale los IDs,
+sistemas, ubicaciones y descripciones completas
+de los tickets candidatos.
+
+El subagente debe utilizar primero esa informacion
+y evitar consultas MCP redundantes.
+
+Solo debe consultar_ticket si falta informacion
+o necesita confirmar un dato.
+
+"""
+
+
+# --------------------------------------------------
+# 2. SERVIDOR MCP
+# Reutilizado del laboratorio L4
+# --------------------------------------------------
+
+SERVIDORES = {
+    "casos": {
+        "type": "stdio",
+        "command": sys.executable,
+        "args": [str(AQUI / "server.py")],
+    }
+}
+
+
+# --------------------------------------------------
+# 3. HERRAMIENTAS MCP AUTORIZADAS
+# --------------------------------------------------
+
+HERRAMIENTAS = [
+    "mcp__casos__listar_tickets",
+    "mcp__casos__consultar_ticket",
+]
+
+
+# --------------------------------------------------
+# 4. SUBAGENTE VERIFICADOR
+# Adaptado del laboratorio L6
+# --------------------------------------------------
+
+
+AGENTES = {
+    "verificador": AgentDefinition(
+        description=(
+            "Verifica grupos de tickets posiblemente repetidos. "
+            "Consulta sus datos y responde brevemente."
+        ),
+        prompt="""
+Eres el verificador de RepetiDesk IA.
+
+Tu tarea consiste en determinar si varios tickets
+describen problemas similares de Helpdesk.
+
+INSTRUCCIONES:
+
+1. Consulta cada ticket candidato una sola vez.
+2. Compara sistema, ubicacion y descripcion.
+3. Clasifica como RELACIONADOS cuando describan
+   fallas similares en el mismo sistema y ubicacion.
+4. No necesitas demostrar una causa raiz comun.
+5. No afirmes que dos tickets corresponden al
+   mismo dispositivo fisico sin evidencia.
+6. No inventes diagnosticos ni causas.
+7. Responde de manera breve.
+
+CRITERIO DE AGRUPACION:
+
+- Tu objetivo es detectar posibles incidentes relacionados,
+  no confirmar que tengan una misma causa raiz.
+
+- Cuando varios tickets afectan al mismo sistema y ubicacion
+  y describen dificultades similares para utilizar un servicio,
+  pueden pertenecer al mismo grupo de investigacion.
+
+- Los errores de acceso, apertura del sistema e inicio de
+  sesion pueden agruparse como problemas de acceso o
+  disponibilidad cuando afectan al mismo sistema y ubicacion.
+
+- Las diferencias en los sintomas deben explicarse,
+  pero no obligan a separar los tickets si existe una
+  similitud funcional suficiente.
+
+- Si los tickets describen problemas claramente distintos,
+  como no enviar correos y olvidar una contraseña,
+  no los agrupes.
+
+- Una agrupacion indica una posible relacion,
+  nunca una causa raiz confirmada.
+
+FORMATO OBLIGATORIO:
+
+RESULTADO: RELACIONADOS o NO RELACIONADOS
+TICKETS: identificadores
+MOTIVO: una frase
+LIMITACION: causa raiz no confirmada
+
+No realices investigaciones adicionales.
+No repitas consultas.
+Responde en espanol.
+
+OPTIMIZACION DEL VERIFICADOR:
+
+Si el agente principal proporciona los datos completos
+de los tickets, realiza la verificacion con esos datos.
+
+No vuelvas a consultar_ticket cuando la informacion
+sea suficiente.
+
+Si falta informacion importante, utiliza consultar_ticket.
+
+Devuelve una respuesta breve con:
+RESULTADO, TICKETS, MOTIVO y LIMITACION.
+""",
+        tools=[
+            "mcp__casos__consultar_ticket"
+        ],
+        model="inherit",
+    )
+}
+
+
+# --------------------------------------------------
+# 5. CONFIGURACION DEL CLAUDE AGENT SDK
+# Reutilizada del laboratorio L4
+# --------------------------------------------------
+
+def opciones(**extra) -> ClaudeAgentOptions:
+
+    return ClaudeAgentOptions(
+        model=MODELO,
+
+        system_prompt=SYSTEM,
+
+        mcp_servers=SERVIDORES,
+
+        # Permite delegar al subagente.
+        tools=["Agent"],
+
+        allowed_tools=HERRAMIENTAS + ["Agent"],
+
+        agents=AGENTES,
+
+        # Politica del laboratorio L4.
+        hooks={
+            "PreToolUse": [
+                HookMatcher(
+                    matcher=None,
+                    hooks=[hook_politica]
+                )
+            ]
+        },
+
+        setting_sources=[],
+
+        max_turns=int(
+            os.environ.get("MAX_TURNOS", "15")
+        ),
+
+        max_budget_usd=float(
+            os.environ.get("PRESUPUESTO_USD", "0.25")
+        ),
+
+        cwd=str(AQUI),
+
+        **extra,
+    )
+
+
+# --------------------------------------------------
+# 6. MOSTRAR RESPUESTAS Y HERRAMIENTAS
+# Reutilizado del laboratorio L4
+# --------------------------------------------------
+
+def mostrar(m) -> None:
+
+    if isinstance(m, AssistantMessage):
+
+        for b in m.content:
+
+            if isinstance(b, ToolUseBlock):
+                print(
+                    f"[tool] {b.name}({b.input})",
+                    flush=True
+                )
+
+            elif isinstance(b, TextBlock) and b.text.strip():
+                print(
+                    f"\nAgente: {b.text.strip()}",
+                    flush=True
+                )
+
+    elif isinstance(m, UserMessage):
+
+        if isinstance(m.content, list):
+
+            for b in m.content:
+
+                if isinstance(b, ToolResultBlock):
+                    resultado = (
+                        "error" if b.is_error else "ok"
+                    )
+
+                    print(
+                        f"  -> {resultado}",
+                        flush=True
+                    )
+
+    elif isinstance(m, ResultMessage):
+
+        costo = (
+            f"USD {m.total_cost_usd:.4f}"
+            if m.total_cost_usd is not None
+            else "s/d"
+        )
+
+        print(
+            f"\n[resultado] {m.subtype} "
+            f"- turnos={m.num_turns} "
+            f"- costo={costo}",
+            flush=True
+        )
+
+
+# --------------------------------------------------
+# 7. EJECUTAR AGENTE
+# Reutilizado del laboratorio L4
+# --------------------------------------------------
+
+async def correr(mision: str) -> None:
+
+    try:
+
+        async for m in query(
+            prompt=mision,
+            options=opciones()
+        ):
+
+            mostrar(m)
+
+    except ResultError as exc:
+
+        print(
+            f"[freno] {exc}",
+            flush=True
+        )
+
+
+# --------------------------------------------------
+# 8. INICIO DEL PROGRAMA
+# --------------------------------------------------
+
+if __name__ == "__main__":
+
+    mision = (
+        " ".join(sys.argv[1:])
+        or "Que incidentes repetidos hay en Helpdesk?"
+    )
+
+    print("=" * 70)
+    print("REPETIDESK IA")
+    print(f"Mision: {mision}")
+    print(f"Modelo: {proveedor()} - {MODELO}")
+    print("=" * 70)
+
+    anyio.run(correr, mision)

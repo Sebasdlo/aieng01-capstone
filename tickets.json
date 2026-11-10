@@ -1,0 +1,92 @@
+{
+  "T001": {
+    "sistema": "Inventarios",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "No puedo ingresar al sistema de inventarios",
+    "estado": "abierto"
+  },
+  "T002": {
+    "sistema": "Inventarios",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "El sistema de inventarios no abre",
+    "estado": "abierto"
+  },
+  "T003": {
+    "sistema": "Inventarios",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "Error al iniciar sesion en inventarios",
+    "estado": "abierto"
+  },
+  "T004": {
+    "sistema": "Impresoras",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "La impresora de etiquetas no imprime",
+    "estado": "abierto"
+  },
+  "T005": {
+    "sistema": "Impresoras",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "La impresora Zebra no genera etiquetas",
+    "estado": "abierto"
+  },
+  "T006": {
+    "sistema": "Correo",
+    "ubicacion": "Oficina Bogota",
+    "descripcion": "No puedo enviar correos",
+    "estado": "abierto"
+  },
+  "T007": {
+    "sistema": "Red",
+    "ubicacion": "Bodega Cali",
+    "descripcion": "No hay conexion a internet",
+    "estado": "abierto"
+  },
+  "T008": {
+    "sistema": "Red",
+    "ubicacion": "Bodega Cali",
+    "descripcion": "Los computadores no tienen acceso a internet",
+    "estado": "abierto"
+  },
+  "T009": {
+    "sistema": "Windows",
+    "ubicacion": "Oficina Bogota",
+    "descripcion": "El computador no enciende",
+    "estado": "abierto"
+  },
+  "T010": {
+    "sistema": "Correo",
+    "ubicacion": "Oficina Bogota",
+    "descripcion": "Olvide mi contraseña del correo",
+    "estado": "abierto"
+  },
+  "T011": {
+    "sistema": "Inventarios",
+    "ubicacion": "Bodega Cali",
+    "descripcion": "Error al consultar existencias",
+    "estado": "abierto"
+  },
+  "T012": {
+    "sistema": "Impresoras",
+    "ubicacion": "Bodega Medellin",
+    "descripcion": "Impresora de etiquetas desconectada",
+    "estado": "abierto"
+  },
+  "T013": {
+    "sistema": "Red",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "Conexion de red intermitente",
+    "estado": "abierto"
+  },
+  "T014": {
+    "sistema": "Windows",
+    "ubicacion": "Oficina Bogota",
+    "descripcion": "El computador esta muy lento",
+    "estado": "abierto"
+  },
+  "T015": {
+    "sistema": "Inventarios",
+    "ubicacion": "Bodega Bogota",
+    "descripcion": "No puedo acceder al modulo de inventarios",
+    "estado": "abierto"
+  }
+}
