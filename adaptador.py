@@ -140,11 +140,42 @@ if __name__ == "__main__":
     pregunta = " ".join(a for a in args if a != "--sin-guardrails")
     if not pregunta:
         sys.exit('Uso: python adaptador.py "tu pregunta"')
+    print("=" * 68, flush=True)
+    print("REPETIDESK IA - ANALISIS DE HELPDESK", flush=True)
+    print(f"Pregunta: {pregunta}", flush=True)
+    print("=" * 68, flush=True)
+
     r = run_agent(pregunta, con_guardrails=con_guardrails)
-    print(f"\nRespuesta: {r.respuesta}\n")
+
+    if r.bloqueado_entrada:
+        print("\n[SEGURIDAD] Consulta bloqueada por el guardrail de entrada.")
+    else:
+        nombres = [h["nombre"] for h in r.herramientas]
+        if "listar_tickets" in nombres:
+            print("\n[1] Servidor MCP: tickets consultados.")
+        if "consultar_ticket" in nombres:
+            cuantos = nombres.count("consultar_ticket")
+            print(f"[MCP] Consultas individuales: {cuantos}.")
+        if "Agent" in nombres:
+            print("[2] Subagente verificador: ejecutado.")
+        if r.bloqueado_salida:
+            print("[SEGURIDAD] Respuesta bloqueada por el guardrail de salida.")
+        elif con_guardrails:
+            print("[3] Guardrails de entrada y salida aplicados.")
+
+    print("\n" + "-" * 68)
+    print("RESULTADO DEL ANALISIS")
+    print("-" * 68)
+    print(r.respuesta)
+    print("\n" + "-" * 68)
+    print("RESUMEN DE EJECUCION")
+    print("-" * 68)
     print(f"Herramientas: {', '.join(h['nombre'] for h in r.herramientas) or 'ninguna'}")
     if r.bloqueado_entrada or r.bloqueado_salida:
-        print(f"Guardrail: bloqueó en la {'entrada' if r.bloqueado_entrada else 'salida'} · {r.motivo_guardrail}")
-    print(f"Modelos: {', '.join(r.modelos) or 's/d'} · tokens {r.tokens_entrada} + {r.tokens_salida} · "
-          f"costo ≈ USD {r.costo_usd:.5f}")
-    print(f"Traza: trazas/{r.traza}.jsonl  (léela con: python ver_traza.py)")
+        etapa = 'entrada' if r.bloqueado_entrada else 'salida'
+        print(f"Guardrail: bloqueado en {etapa} - {r.motivo_guardrail}")
+    print(f"Modelos: {', '.join(r.modelos) or 's/d'}")
+    print(f"Tokens: {r.tokens_entrada} entrada + {r.tokens_salida} salida")
+    print(f"Costo estimado: USD {r.costo_usd:.5f}")
+    print(f"Traza: trazas/{r.traza}.jsonl")
+    print("Para leerla: python ver_traza.py")

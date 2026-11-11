@@ -403,10 +403,17 @@ def mostrar(m) -> None:
 
             if isinstance(b, ToolUseBlock):
 
-                print(
-                    f"[tool] {b.name}({b.input})",
-                    flush=True
-                )
+                # Presentacion legible: no imprimir el prompt interno de Agent.
+                if b.name == "Agent":
+                    tipo = b.input.get("subagent_type", "verificador") if isinstance(b.input, dict) else "verificador"
+                    print(f"[subagente] Verificando grupos con {tipo}...", flush=True)
+                elif b.name.endswith("listar_tickets"):
+                    print("[MCP] Consultando lista de tickets...", flush=True)
+                elif b.name.endswith("consultar_ticket"):
+                    ticket = b.input.get("ticket_id", "") if isinstance(b.input, dict) else ""
+                    print(f"[MCP] Consultando ticket {ticket}...", flush=True)
+                else:
+                    print(f"[herramienta] {b.name}", flush=True)
 
             elif isinstance(b, TextBlock) and b.text.strip():
 
