@@ -16,6 +16,7 @@ de Helpdesk utilizando datos simulados.
 import os
 import sys
 import re
+import json
 import textwrap
 from pathlib import Path
 
@@ -392,53 +393,162 @@ def opciones(**extra) -> ClaudeAgentOptions:
 # 7. PRESENTACION EN TERMINAL (SIN ALTERAR EL AGENTE)
 # --------------------------------------------------
 
+def _tickets_desde_json() -> list[dict]:
+    """Lee el mismo archivo simulado utilizado por el servidor MCP.
+
+    Respeta TICKETS_DB cuando se configure. No hace llamadas a Claude.
+    """
+    ruta = Path(os.environ.get("TICKETS_DB", str(AQUI / "datos" / "tickets.json")))
+    if not ruta.is_absolute():
+        ruta = AQUI / ruta
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    if isinstance(datos, dict):
+        # Se admiten tanto {"tickets": [...]} como {"T001": {...}}.
+        if isinstance(datos.get("tickets"), list):
+            datos = datos["tickets"]
+        else:
+            datos = [dict(valor, id=clave) for clave, valor in datos.items()
+                     if isinstance(valor, dict)]
+    if not isinstance(datos, list):
+        return []
+
+    salida = []
+    for t in datos:
+        if not isinstance(t, dict):
+            continue
+        ident = str(t.get("id") or t.get("ticket_id") or t.get("ID") or "").upper()
+        if re.fullmatch(r"T\d{3,}", ident):
+            salida.append({"id": ident,
+                           "sistema": str(t.get("sistema", "")),
+                           "ubicacion": str(t.get("ubicacion", "")),
+                           "descripcion": str(t.get("descripcion", ""))})
+    return salida
+
+
+def _ids_en_grupos(respuesta: str) -> set[str]:
+    """Obtiene SOLO los tickets listados en los grupos del modelo."""
+    ids = set()
+    dentro_grupo = False
+    for linea in respuesta.splitlines():
+        texto = re.sub(r"[#*]", "", linea).strip()
+        if re.match(r"^(?:📋\s*)?grupo\s+\d+\s*[:.\-]", texto, re.I):
+            dentro_grupo = True
+            continue
+        if re.match(r"^(?:⚠️?\s*)?(?:otros\s+tickets|tickets|problemas|incidentes)\s+(?:no\s+agrupados|\(sin\s+agrupaci[oó]n\))", texto, re.I):
+            dentro_grupo = False
+        if re.match(r"^(?:⚡\s*|⚠️?\s*)?nota(?:\s+importante)?\s*:?", texto, re.I):
+            dentro_grupo = False
+        if dentro_grupo and re.match(r"^(?:[•-]\s*)?tickets\s+relacionados\s*:", texto, re.I):
+            ids.update(re.findall(r"\bT\d{3,}\b", texto, re.I))
+    return {i.upper() for i in ids}
+
+
+def _imprimir_no_agrupados(tickets: list[dict], agrupados: set[str]) -> None:
+    """Lista los tickets restantes sin inventar descripciones."""
+    print("\n  ⚠️ TICKETS NO AGRUPADOS")
+    print("  " + "─" * 58)
+    restantes = sorted((t for t in tickets if t["id"] not in agrupados),
+                      key=lambda t: int(t["id"][1:]))
+    if not restantes:
+        print("    • Ninguno")
+        return
+    for t in restantes:
+        detalle = " - ".join(x for x in (t["sistema"], t["ubicacion"]) if x)
+        prefijo = f"{t['id']} ({detalle}): " if detalle else f"{t['id']}: "
+        print(textwrap.fill("• " + prefijo + t["descripcion"], width=82,
+                            initial_indent="    ", subsequent_indent="      ",
+                            break_long_words=False))
+
+
 def presentar_respuesta(respuesta: str) -> None:
-    """Presenta el informe con titulos 📋 GRUPO, sangria y espacios uniformes."""
+    """Muestra grupos, tickets restantes y nota de forma consistente."""
     print("\n" + "=" * 70)
     print("RESULTADO FINAL - REPETIDESK IA")
     print("=" * 70)
 
+    tickets = _tickets_desde_json()
+    agrupados = _ids_en_grupos(respuesta)
+    # Solo se calcula la sección en respuestas de agrupación y con evidencia.
+    mostrar_restantes = bool(tickets and agrupados)
+    restantes_mostrados = False
+    ocultar_seccion_modelo = False
     linea_vacia = False
+
     for linea in respuesta.splitlines():
-        t = linea.strip()
-        if not t:
+        texto = linea.strip()
+        if not texto:
+            linea_vacia = True
+            continue
+        texto = re.sub(r"^#{1,6}\s*", "", texto).replace("**", "").strip()
+        if re.fullmatch(r"[-─_]{3,}", texto):
             linea_vacia = True
             continue
 
-        # Retira solo marcadores visuales de Markdown, no el contenido.
-        t = re.sub(r"^#{1,6}\s*", "", t).replace("**", "").strip()
-        es_vineta = t.startswith("- ")
-        if es_vineta:
-            t = t[2:].strip()
-
-        # Omite separadores redundantes: cada grupo ya tiene su encabezado.
-        if re.fullmatch(r"-{3,}", t):
-            linea_vacia = True
+        encabezado_no_agrupados = re.match(
+            r"^(?:⚠️?\s*)?(?:(?:otros\s+)?tickets|problemas|incidentes)"
+            r"\s*(?:no\s+agrupados|\(sin\s+agrupaci[oó]n\))\s*:?$",
+            texto, re.I)
+        if encabezado_no_agrupados:
+            ocultar_seccion_modelo = mostrar_restantes
+            if mostrar_restantes and not restantes_mostrados:
+                _imprimir_no_agrupados(tickets, agrupados)
+                restantes_mostrados = True
+            elif not mostrar_restantes:
+                print("\n  ⚠️ TICKETS NO AGRUPADOS")
+                print("  " + "─" * 58)
             continue
 
-        grupo = re.match(r"^(?:📋\s*)?grupo\s+(\d+)\s*[:\-.]\s*(.+)$", t, re.I)
+        nota = re.match(r"^(?:⚡\s*|⚠️?\s*)?nota(?:\s+importante)?\s*:?\s*(.*)$", texto, re.I)
+        if nota:
+            ocultar_seccion_modelo = False
+            if mostrar_restantes and not restantes_mostrados:
+                _imprimir_no_agrupados(tickets, agrupados)
+                restantes_mostrados = True
+            print("\n  ⚡ NOTA IMPORTANTE")
+            print("  " + "─" * 58)
+            contenido = nota.group(1).strip()
+            if contenido:
+                print(textwrap.fill(contenido, width=82, initial_indent="    ",
+                                    subsequent_indent="    ", break_long_words=False))
+            linea_vacia = False
+            continue
+
+        grupo = re.match(r"^(?:📋\s*)?grupo\s+(\d+)\s*[:\-.]\s*(.+)$", texto, re.I)
         if grupo:
-            numero, nombre = grupo.groups()
-            titulo = f"📋 GRUPO {numero}: {nombre}"
-            print("\n" + "  " + titulo)
+            ocultar_seccion_modelo = False
+            print(f"\n  📋 GRUPO {grupo.group(1)}: {grupo.group(2)}")
             print("  " + "─" * 58)
             linea_vacia = False
+            continue
+
+        if ocultar_seccion_modelo:
             continue
 
         if linea_vacia:
             print()
             linea_vacia = False
 
-        if re.match(r"^(?:Sistema(?: afectado)?|Ubicaci[oó]n|Tickets relacionados|Cantidad(?: de (?:tickets|incidentes))?|Motivo(?: de agrupaci[oó]n)?|Recomendaci[oó]n(?: para Helpdesk)?|Limitaci[oó]n)\s*:", t, re.I):
-            print(textwrap.fill("• " + t, width=82, initial_indent="    ",
+        era_vineta = bool(re.match(r"^[-*•]\s+", texto))
+        if era_vineta:
+            texto = re.sub(r"^[-*•]\s+", "", texto).strip()
+        es_campo = bool(re.match(
+            r"^(?:Sistema(?: afectado)?|Ubicaci[oó]n|Tickets relacionados|Cantidad"
+            r"(?: de (?:tickets|incidentes))?|Motivo(?: de (?:la )?agrupaci[oó]n)?|"
+            r"Recomendaci[oó]n(?: para Helpdesk)?|Limitaci[oó]n)\s*:",
+            texto, re.I))
+        if es_campo or era_vineta or re.match(r"^T\d{3,}\b", texto, re.I):
+            print(textwrap.fill("• " + texto, width=82, initial_indent="    ",
                                 subsequent_indent="      ", break_long_words=False))
         else:
-            if es_vineta:
-                print(textwrap.fill("• " + t, width=82, initial_indent="    ",
-                                    subsequent_indent="      ", break_long_words=False))
-            else:
-                print(textwrap.fill(t, width=82, initial_indent="  ",
-                                    subsequent_indent="  ", break_long_words=False))
+            print(textwrap.fill(texto, width=82, initial_indent="  ",
+                                subsequent_indent="  ", break_long_words=False))
+
+    if mostrar_restantes and not restantes_mostrados:
+        _imprimir_no_agrupados(tickets, agrupados)
 
 
 # --------------------------------------------------
