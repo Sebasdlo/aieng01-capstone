@@ -1,9 +1,12 @@
-"""
-L7 · Paso 2: leer una traza como la leería quien atiende un incidente.
+"""RepetiDesk IA | visor de trazas del laboratorio L7.
 
-Ejecuta:
-    python ver_traza.py                      # la última traza
-    python ver_traza.py trazas/<id>.jsonl    # una traza concreta
+Uso:
+    python ver_traza.py
+    python ver_traza.py trazas/archivo.jsonl
+    python ver_traza.py --detalle
+    python ver_traza.py --detalle trazas/archivo.jsonl
+
+Solo cambia la visualizacion: no altera el contenido de las trazas.
 """
 
 import sys
@@ -11,39 +14,124 @@ from pathlib import Path
 
 import trazas
 
-# Haiku 4.5, USD por millón de tokens
-PRECIO_ENTRADA, PRECIO_SALIDA = 1.0, 5.0
+# Tarifa orientativa para el calculo simple del visor; no contempla cache.
+PRECIO_ENTRADA = 1.0
+PRECIO_SALIDA = 5.0
+ANCHO = 66
 
 
-def mostrar(ruta: Path) -> None:
+def _tiempo(ms):
+    """Marca temporal relativa en minutos y segundos."""
+    total_ms = max(0, int(ms or 0))
+    minutos, resto = divmod(total_ms, 60_000)
+    segundos, milesimas = divmod(resto, 1_000)
+    return f"[{minutos:02}:{segundos:02}.{milesimas:03}]"
+
+
+def _estado_herramienta(evento):
+    if evento.get("is_error") or evento.get("clase") == "error":
+        return "ERROR"
+    if evento.get("clase") == "ok":
+        return "OK"
+    return "SIN CONFIRMAR"
+
+
+def _descripcion_herramienta(evento):
+    nombre = evento.get("nombre", "desconocida")
+    if nombre == "listar_tickets":
+        return "Consulta general de tickets"
+    if nombre == "consultar_ticket":
+        datos = evento.get("entrada") or {}
+        ticket = datos.get("ticket_id") if isinstance(datos, dict) else None
+        return f"Consulta individual de ticket{': ' + str(ticket) if ticket else ''}"
+    if nombre == "Agent":
+        datos = evento.get("entrada") or {}
+        subagente = datos.get("subagent_type") if isinstance(datos, dict) else None
+        return f"Subagente verificador{': ' + subagente if subagente else ''}"
+    return f"Herramienta {nombre}"
+
+
+def _num(valor):
+    return f"{int(valor or 0):,}".replace(",", ".")
+
+
+def mostrar(ruta: Path, detalle: bool = False) -> None:
     eventos = trazas.leer(ruta)
-    tin = sum(e.get("gen_ai.usage.input_tokens", 0) for e in eventos)
-    tout = sum(e.get("gen_ai.usage.output_tokens", 0) for e in eventos)
-    print(f"Traza {eventos[0]['traza_id']} · {ruta.name}")
-    print(f"Pregunta: {eventos[0].get('pregunta', '')}\n")
+    if not eventos:
+        print(f"La traza esta vacia: {ruta}")
+        return
+
+    primero = eventos[0]
+    tin = sum(int(e.get("gen_ai.usage.input_tokens") or 0) for e in eventos)
+    tout = sum(int(e.get("gen_ai.usage.output_tokens") or 0) for e in eventos)
+    modelos = []
     for e in eventos:
-        t = f"{e['t_ms']:>8.0f} ms"
-        dur = f" ({e['duracion_ms']:.0f} ms)" if "duracion_ms" in e else ""
-        if e["tipo"] == "modelo":
-            print(f"{t}  🧠 modelo · vuelta {e['vuelta']} · stop_reason={e.get('stop_reason')} · "
-                  f"in={e.get('gen_ai.usage.input_tokens')} out={e.get('gen_ai.usage.output_tokens')}{dur}")
-        elif e["tipo"] == "herramienta":
-            marca = "❌" if e.get("is_error") else "🔧"
-            print(f"{t}    {marca} {e['nombre']}({e.get('entrada')}) → {e.get('clase')}{dur}")
-        elif e["tipo"] == "guardrail":
-            marca = "🛡️ " if e.get("permitir") else "⛔"
-            print(f"{t}  {marca} guardrail de {e['nombre']}: {'pasa' if e.get('permitir') else 'BLOQUEA'}"
-                  f"{' · ' + e['motivo'] if e.get('motivo') else ''}{dur}")
-        elif e["tipo"] == "freno":
-            print(f"{t}  🛑 freno: {e['nombre']}")
-        elif e["nombre"] == "fin":
-            print(f"{t}  ✔ fin · {e.get('resultado')} · total {e.get('duracion_total_ms', 0):.0f} ms")
-    costo = (tin * PRECIO_ENTRADA + tout * PRECIO_SALIDA) / 1e6
-    print(f"\nTokens: {tin} de entrada + {tout} de salida · costo ≈ USD {costo:.5f} (Haiku 4.5)")
+        if e.get("tipo") == "modelo":
+            for modelo in e.get("modelos", []):
+                if modelo not in modelos:
+                    modelos.append(modelo)
+    fin = next((e for e in reversed(eventos) if e.get("nombre") == "fin"), None)
+    duracion = (fin or {}).get("duracion_total_ms")
+    if duracion is None:
+        duracion = max((e.get("t_ms") or 0) for e in eventos)
+
+    print("=" * ANCHO)
+    print("REPETIDESK IA - TRAZABILIDAD DE EJECUCION")
+    print("=" * ANCHO)
+    print(f"Archivo:  {ruta}")
+    print(f"Traza:    {primero.get('traza_id', 's/d')}")
+    print(f"Pregunta: {primero.get('pregunta', 's/d')}")
+    print("\nRECORRIDO DEL AGENTE")
+    print("-" * ANCHO)
+
+    for e in eventos:
+        marca = _tiempo(e.get("t_ms", 0))
+        tipo = e.get("tipo")
+        nombre = e.get("nombre")
+        if tipo == "guardrail":
+            estado = "PERMITIDO" if e.get("permitir") else "BLOQUEADO"
+            print(f"{marca} Guardrail de {nombre}: {estado}")
+            if e.get("motivo"):
+                print(f"           Detalle: {e['motivo']}")
+        elif tipo == "herramienta":
+            print(f"{marca} {_descripcion_herramienta(e)}: {_estado_herramienta(e)}")
+            if detalle:
+                print(f"           Nombre tecnico: {nombre}")
+                print(f"           Parametros: {e.get('entrada')}")
+        elif tipo == "modelo":
+            print(f"{marca} Procesamiento del modelo: {e.get('stop_reason', 's/d')}")
+            if detalle:
+                print(f"           Vuelta: {e.get('vuelta', 's/d')}")
+        elif tipo == "freno":
+            print(f"{marca} Ejecucion detenida: {nombre}")
+        elif nombre == "fin":
+            print(f"{marca} Fin de la ejecucion")
+            if detalle:
+                print(f"           Resultado: {e.get('resultado', 's/d')}")
+
+    print("\nRESUMEN DE EJECUCION")
+    print("-" * ANCHO)
+    print(f"Estado:             {(fin or {}).get('resultado', 'no registrado')}")
+    print(f"Modelo(s):          {', '.join(modelos) or 'no registrado'}")
+    print(f"Tokens de entrada:  {_num(tin)}")
+    print(f"Tokens de salida:   {_num(tout)}")
+    print(f"Duracion total:     {float(duracion) / 1000:.2f} segundos")
+    estimado = (tin * PRECIO_ENTRADA + tout * PRECIO_SALIDA) / 1_000_000
+    print(f"Costo simple*:      USD {estimado:.5f}")
+    print("=" * ANCHO)
+    print("* Estimacion con tarifa plana; no considera cache ni desglose")
+    print("  por modelo. Para el costo registrado usa adaptador.py.")
+    if not detalle:
+        print("Detalle completo: python ver_traza.py --detalle")
 
 
 if __name__ == "__main__":
-    ruta = Path(sys.argv[1]) if len(sys.argv) > 1 else trazas.ultima()
+    argumentos = sys.argv[1:]
+    detalle = "--detalle" in argumentos
+    rutas = [a for a in argumentos if a != "--detalle"]
+    if len(rutas) > 1:
+        sys.exit("Uso: python ver_traza.py [--detalle] [trazas/archivo.jsonl]")
+    ruta = Path(rutas[0]) if rutas else trazas.ultima()
     if ruta is None or not ruta.exists():
-        sys.exit("No hay trazas todavía: corre antes `python agente.py \"...\"`.")
-    mostrar(ruta)
+        sys.exit('No hay trazas todavia: ejecuta primero python adaptador.py "tu pregunta".')
+    mostrar(ruta, detalle=detalle)

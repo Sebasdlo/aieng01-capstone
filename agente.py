@@ -15,6 +15,8 @@ de Helpdesk utilizando datos simulados.
 
 import os
 import sys
+import re
+import textwrap
 from pathlib import Path
 
 import anyio
@@ -387,96 +389,111 @@ def opciones(**extra) -> ClaudeAgentOptions:
 
 
 # --------------------------------------------------
-# 7. MOSTRAR RESPUESTAS Y HERRAMIENTAS
-# Reutilizado del laboratorio L4
+# 7. PRESENTACION EN TERMINAL (SIN ALTERAR EL AGENTE)
 # --------------------------------------------------
 
-def mostrar(m) -> None:
-    """
-    Muestra las herramientas utilizadas, sus resultados
-    y el costo reportado por Claude Agent SDK.
-    """
+def presentar_respuesta(respuesta: str) -> None:
+    """Presenta el informe con titulos 📋 GRUPO, sangria y espacios uniformes."""
+    print("\n" + "=" * 70)
+    print("RESULTADO FINAL - REPETIDESK IA")
+    print("=" * 70)
 
-    if isinstance(m, AssistantMessage):
+    linea_vacia = False
+    for linea in respuesta.splitlines():
+        t = linea.strip()
+        if not t:
+            linea_vacia = True
+            continue
 
-        for b in m.content:
+        # Retira solo marcadores visuales de Markdown, no el contenido.
+        t = re.sub(r"^#{1,6}\s*", "", t).replace("**", "").strip()
+        es_vineta = t.startswith("- ")
+        if es_vineta:
+            t = t[2:].strip()
 
-            if isinstance(b, ToolUseBlock):
+        # Omite separadores redundantes: cada grupo ya tiene su encabezado.
+        if re.fullmatch(r"-{3,}", t):
+            linea_vacia = True
+            continue
 
-                # Presentacion legible: no imprimir el prompt interno de Agent.
-                if b.name == "Agent":
-                    tipo = b.input.get("subagent_type", "verificador") if isinstance(b.input, dict) else "verificador"
-                    print(f"[subagente] Verificando grupos con {tipo}...", flush=True)
-                elif b.name.endswith("listar_tickets"):
-                    print("[MCP] Consultando lista de tickets...", flush=True)
-                elif b.name.endswith("consultar_ticket"):
-                    ticket = b.input.get("ticket_id", "") if isinstance(b.input, dict) else ""
-                    print(f"[MCP] Consultando ticket {ticket}...", flush=True)
-                else:
-                    print(f"[herramienta] {b.name}", flush=True)
+        grupo = re.match(r"^(?:📋\s*)?grupo\s+(\d+)\s*[:\-.]\s*(.+)$", t, re.I)
+        if grupo:
+            numero, nombre = grupo.groups()
+            titulo = f"📋 GRUPO {numero}: {nombre}"
+            print("\n" + "  " + titulo)
+            print("  " + "─" * 58)
+            linea_vacia = False
+            continue
 
-            elif isinstance(b, TextBlock) and b.text.strip():
+        if linea_vacia:
+            print()
+            linea_vacia = False
 
-                print(
-                    f"\nAgente: {b.text.strip()}",
-                    flush=True
-                )
-
-    elif isinstance(m, UserMessage):
-
-        if isinstance(m.content, list):
-
-            for b in m.content:
-
-                if isinstance(b, ToolResultBlock):
-
-                    resultado = (
-                        "error" if b.is_error else "ok"
-                    )
-
-                    print(
-                        f"  -> {resultado}",
-                        flush=True
-                    )
-
-    elif isinstance(m, ResultMessage):
-
-        costo = (
-            f"USD {m.total_cost_usd:.4f}"
-            if m.total_cost_usd is not None
-            else "s/d"
-        )
-
-        print(
-            f"\n[resultado] {m.subtype} "
-            f"- turnos={m.num_turns} "
-            f"- costo={costo}",
-            flush=True
-        )
+        if re.match(r"^(?:Sistema(?: afectado)?|Ubicaci[oó]n|Tickets relacionados|Cantidad(?: de (?:tickets|incidentes))?|Motivo(?: de agrupaci[oó]n)?|Recomendaci[oó]n(?: para Helpdesk)?|Limitaci[oó]n)\s*:", t, re.I):
+            print(textwrap.fill("• " + t, width=82, initial_indent="    ",
+                                subsequent_indent="      ", break_long_words=False))
+        else:
+            if es_vineta:
+                print(textwrap.fill("• " + t, width=82, initial_indent="    ",
+                                    subsequent_indent="      ", break_long_words=False))
+            else:
+                print(textwrap.fill(t, width=82, initial_indent="  ",
+                                    subsequent_indent="  ", break_long_words=False))
 
 
 # --------------------------------------------------
 # 8. EJECUTAR AGENTE
-# Reutilizado del laboratorio L4
 # --------------------------------------------------
 
 async def correr(mision: str) -> None:
+    respuesta_final = ""
+    hubo_error = False
+    ultimo_resultado = None
+    pendientes = {}
 
     try:
+        async for m in query(prompt=mision, options=opciones()):
+            if isinstance(m, AssistantMessage):
+                for b in m.content:
+                    if isinstance(b, ToolUseBlock):
+                        nombre = b.name.split("__")[-1]
+                        pendientes[b.id] = nombre
+                        if nombre == "listar_tickets":
+                            print("[MCP] Consultando tickets...", flush=True)
+                        elif nombre == "consultar_ticket":
+                            print("[MCP] Consultando ticket individual...", flush=True)
+                        elif nombre == "Agent":
+                            print("[SUBAGENTE] Verificando grupos...", flush=True)
+                        else:
+                            print(f"[HERRAMIENTA] {nombre}", flush=True)
+                    elif isinstance(b, TextBlock) and b.text.strip():
+                        respuesta_final = b.text.strip()
 
-        async for m in query(
-            prompt=mision,
-            options=opciones()
-        ):
+            elif isinstance(m, UserMessage) and isinstance(m.content, list):
+                for b in m.content:
+                    if isinstance(b, ToolResultBlock):
+                        nombre = pendientes.pop(b.tool_use_id, "herramienta")
+                        print(f"  -> {nombre}: {'ERROR' if b.is_error else 'OK'}", flush=True)
 
-            mostrar(m)
+            elif isinstance(m, ResultMessage):
+                ultimo_resultado = m
+                if m.result and m.result.strip():
+                    respuesta_final = m.result.strip()
 
     except ResultError as exc:
+        hubo_error = True
+        print(f"\n[FRENO] {exc}", flush=True)
 
-        print(
-            f"[freno] {exc}",
-            flush=True
-        )
+    if not hubo_error and respuesta_final:
+        presentar_respuesta(respuesta_final)
+    elif not hubo_error:
+        print("\nNo se recibio una respuesta final del modelo.")
+
+    if ultimo_resultado is not None:
+        costo = (f"USD {ultimo_resultado.total_cost_usd:.4f}"
+                 if ultimo_resultado.total_cost_usd is not None else "s/d")
+        print(f"\n[SDK] Estado: {ultimo_resultado.subtype} | "
+              f"Turnos: {ultimo_resultado.num_turns} | Costo reportado: {costo}")
 
 
 # --------------------------------------------------
@@ -484,16 +501,10 @@ async def correr(mision: str) -> None:
 # --------------------------------------------------
 
 if __name__ == "__main__":
-
-    mision = (
-        " ".join(sys.argv[1:])
-        or "¿Que incidentes repetidos hay en Helpdesk?"
-    )
-
+    mision = " ".join(sys.argv[1:]) or "¿Que incidentes repetidos hay en Helpdesk?"
     print("=" * 70)
     print("REPETIDESK IA")
     print(f"Mision: {mision}")
     print(f"Modelo: {proveedor()} - {MODELO}")
     print("=" * 70)
-
     anyio.run(correr, mision)

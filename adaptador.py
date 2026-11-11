@@ -135,47 +135,63 @@ def run_agent(pregunta: str, con_guardrails: bool = True, verboso: bool = False)
 
 
 if __name__ == "__main__":
+    # Presentacion para diagnostico; no modifica run_agent() ni evals.py.
+    from collections import Counter
+
     args = sys.argv[1:]
     con_guardrails = "--sin-guardrails" not in args
-    pregunta = " ".join(a for a in args if a != "--sin-guardrails")
+    mostrar_respuesta = "--respuesta" in args
+    pregunta = " ".join(
+        a for a in args if a not in ("--sin-guardrails", "--respuesta")
+    ).strip()
     if not pregunta:
-        sys.exit('Uso: python adaptador.py "tu pregunta"')
-    print("=" * 68, flush=True)
-    print("REPETIDESK IA - ANALISIS DE HELPDESK", flush=True)
-    print(f"Pregunta: {pregunta}", flush=True)
-    print("=" * 68, flush=True)
+        sys.exit('Uso: python adaptador.py [--sin-guardrails] [--respuesta] "tu pregunta"')
 
     r = run_agent(pregunta, con_guardrails=con_guardrails)
+    conteos = Counter(h["nombre"] for h in r.herramientas)
 
-    if r.bloqueado_entrada:
-        print("\n[SEGURIDAD] Consulta bloqueada por el guardrail de entrada.")
+    linea = "=" * 59
+    print(f"\n{linea}")
+    print("REPETIDESK IA - DIAGNOSTICO DE EJECUCION")
+    print(linea)
+    print(f"Pregunta: {r.pregunta}")
+
+    print("\nOPERACIONES REALIZADAS")
+    print(f"Consulta general de tickets:          {conteos['listar_tickets']}")
+    print(f"Consultas individuales de tickets:    {conteos['consultar_ticket']}")
+    print(f"Verificaciones con subagente:         {conteos['Agent']}")
+    otras = {nombre: n for nombre, n in conteos.items()
+             if nombre not in ('listar_tickets', 'consultar_ticket', 'Agent')}
+    for nombre, n in sorted(otras.items()):
+        print(f"Otra herramienta ({nombre}): {n}")
+
+    print("\nSEGURIDAD")
+    if not con_guardrails:
+        print("Guardrail de entrada:                 DESACTIVADO")
+        print("Guardrail de salida:                  DESACTIVADO")
+    elif r.bloqueado_entrada:
+        print("Guardrail de entrada:                 BLOQUEADO")
+        print("Guardrail de salida:                  NO EJECUTADO")
+    elif r.bloqueado_salida:
+        print("Guardrail de entrada:                 PERMITIDO")
+        print("Guardrail de salida:                  BLOQUEADO")
     else:
-        nombres = [h["nombre"] for h in r.herramientas]
-        if "listar_tickets" in nombres:
-            print("\n[1] Servidor MCP: tickets consultados.")
-        if "consultar_ticket" in nombres:
-            cuantos = nombres.count("consultar_ticket")
-            print(f"[MCP] Consultas individuales: {cuantos}.")
-        if "Agent" in nombres:
-            print("[2] Subagente verificador: ejecutado.")
-        if r.bloqueado_salida:
-            print("[SEGURIDAD] Respuesta bloqueada por el guardrail de salida.")
-        elif con_guardrails:
-            print("[3] Guardrails de entrada y salida aplicados.")
+        print("Guardrail de entrada:                 PERMITIDO")
+        print("Guardrail de salida:                  PERMITIDO")
+    if r.motivo_guardrail:
+        print(f"Motivo: {r.motivo_guardrail}")
 
-    print("\n" + "-" * 68)
-    print("RESULTADO DEL ANALISIS")
-    print("-" * 68)
-    print(r.respuesta)
-    print("\n" + "-" * 68)
-    print("RESUMEN DE EJECUCION")
-    print("-" * 68)
-    print(f"Herramientas: {', '.join(h['nombre'] for h in r.herramientas) or 'ninguna'}")
-    if r.bloqueado_entrada or r.bloqueado_salida:
-        etapa = 'entrada' if r.bloqueado_entrada else 'salida'
-        print(f"Guardrail: bloqueado en {etapa} - {r.motivo_guardrail}")
-    print(f"Modelos: {', '.join(r.modelos) or 's/d'}")
-    print(f"Tokens: {r.tokens_entrada} entrada + {r.tokens_salida} salida")
-    print(f"Costo estimado: USD {r.costo_usd:.5f}")
-    print(f"Traza: trazas/{r.traza}.jsonl")
-    print("Para leerla: python ver_traza.py")
+    print("\nCONSUMO")
+    print(f"Modelo(s):                            {', '.join(r.modelos) or 'no ejecutado'}")
+    print(f"Tokens de entrada:                    {r.tokens_entrada}")
+    print(f"Tokens de salida:                     {r.tokens_salida}")
+    print(f"Costo estimado:                       USD {r.costo_usd:.5f}")
+
+    print("\nTRAZABILIDAD")
+    print(f"Archivo de traza:                     trazas/{r.traza}.jsonl")
+    print("Para consultar:                       python ver_traza.py")
+
+    if mostrar_respuesta or r.bloqueado_entrada or r.bloqueado_salida:
+        print("\nRESPUESTA DEL AGENTE")
+        print(r.respuesta)
+    print(linea)
