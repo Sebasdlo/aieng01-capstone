@@ -105,7 +105,7 @@ Demostración del funcionamiento de RepetiDesk IA,
 incluyendo el servidor MCP, subagente verificador,
 guardrails, evaluaciones y optimización de costos.
 
-https://youtu.be/LNrniobp-tE
+https://youtu.be/anUUjNhzy6g
 
 ## Cómo correrlo
 
