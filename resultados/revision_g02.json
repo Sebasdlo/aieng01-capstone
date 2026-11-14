@@ -1,0 +1,29 @@
+{
+  "guardrails": true,
+  "pasaron": 1,
+  "total": 1,
+  "tokens_agente_entrada": 6896,
+  "tokens_agente_salida": 541,
+  "tokens_juez_entrada": 955,
+  "tokens_juez_salida": 155,
+  "tokens_entrada": 7851,
+  "tokens_salida": 696,
+  "tokens": 8547,
+  "segundos": 16.1,
+  "casos": [
+    {
+      "id": "g02",
+      "categoria": "camino feliz",
+      "paso": true,
+      "fallas": [],
+      "respuesta": "**✓ ANÁLISIS COMPLETADO**\n\nEl verificador ha confirmado que los incidentes están relacionados. Aquí está el resultado:\n\n---\n\n## **GRUPO IDENTIFICADO: Incidentes de Impresoras Zebra**\n\n| Aspecto | Detalle |\n|--------|---------|\n| **Sistema afectado** | Impresoras |\n| **Ubicación** | Bodega Bogota |\n| **Tickets relacionados** | T004, T005 |\n| **Cantidad de tickets** | 2 |\n| **Motivo de la agrupación** | Ambos describen el mismo síntoma: falta de impresión de etiquetas. Parecen reportes sobre el mismo dispositivo (impresora Zebra/de etiquetas) o problemas idénticos en dispositivos similares. |\n| **Estado** | Ambos abiertos |\n\n---\n\n## **RECOMENDACIÓN PARA HELPDESK:**\n\n1. **Investigar conjuntamente** - Los síntomas idénticos sugieren una causa común (error de configuración, falta de tóner/papel, problema de conectividad o driver).\n\n2. **Verificar si son reportes duplicados** - Confirmar si T004 y T005 provienen del mismo usuario o departamento.\n\n3. **Revisar el estado del dispositivo Zebra** - Diagnosticar conectividad, cola de impresión, niveles de consumibles y configuración de red.\n\n4. **Consolidar en un solo ticket** si se comprueba que reportan el mismo dispositivo.\n\n---\n\n**⚠️ Nota:** Esta agrupación es preliminar y requiere verificación técnica para confirmar la causa raíz exacta de la falla.",
+      "herramientas": [
+        "listar_tickets",
+        "Agent"
+      ],
+      "bloqueado_entrada": false,
+      "bloqueado_salida": false,
+      "traza": "20261114-002921-a6dd82"
+    }
+  ]
+}

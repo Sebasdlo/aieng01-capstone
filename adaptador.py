@@ -125,6 +125,13 @@ def run_agent(pregunta: str, con_guardrails: bool = True, verboso: bool = False)
             return res
         res.entrada_al_modelo = d.texto          # con la PII enmascarada
     anyio.run(_correr, res, traza)
+    if con_guardrails and any(h in d.hallazgos for h in ("tarjeta", "clave")):
+        res.respuesta = (
+        "⚠️ Advertencia de seguridad: Detectamos información sensible en tu mensaje. "
+        "Los datos fueron enmascarados antes de enviarlos al modelo. "
+        "Evita compartir números de tarjetas, claves o contraseñas.\n\n"
+        + res.respuesta
+    )
     if con_guardrails:
         d = revisar_salida(res.respuesta, pregunta + "\n" + res.evidencia)
         traza.evento("guardrail", "salida", permitir=d.permitir, motivo=d.motivo)
